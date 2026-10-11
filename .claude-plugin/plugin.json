@@ -1,6 +1,11 @@
 {
-  "name": "collapse-tools",
+  "name": "collapse-tool-use",
   "version": "0.1.0",
   "description": "Hide tool calls between agent messages behind one expandable button per turn",
+  "author": {
+    "name": "Daniel Tan",
+    "email": "danieltanfh95@gmail.com"
+  },
+  "license": "MIT",
   "types": "./types/index.d.ts"
 }

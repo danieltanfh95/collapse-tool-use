@@ -4,7 +4,7 @@ export type CallToBatch = Record<string, string>
 
 declare module 'claude-code' {
   interface PluginState {
-    'collapse-tools': {
+    'collapse-tool-use': {
       batches: Batches
       callToBatch: CallToBatch
       isEnabled: boolean

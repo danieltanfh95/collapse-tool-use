@@ -1,26 +1,97 @@
 import { atom, read, update } from 'claude-code'
-import type { Register, EngineInterface } from 'claude-code'
+import type { Register, EngineInterface, RenderInput } from 'claude-code'
 
 import type { Batches, CallToBatch } from '../types'
 
 const batches = atom(
-  { plugin: 'collapse-tools', key: 'batches' } as const,
+  { plugin: 'collapse-tool-use', key: 'batches' } as const,
   {} as Batches,
 )
 const callToBatch = atom(
-  { plugin: 'collapse-tools', key: 'callToBatch' } as const,
+  { plugin: 'collapse-tool-use', key: 'callToBatch' } as const,
   {} as CallToBatch,
 )
 const isEnabled = atom(
-  { plugin: 'collapse-tools', key: 'isEnabled' } as const,
+  { plugin: 'collapse-tool-use', key: 'isEnabled' } as const,
   true,
 )
 
-const persistBatches = async ($: EngineInterface, sid: string) => {
-  await $.store.set(`batches:${sid}`, await read($, batches))
+const batchesKey = (sid: string) => `batches:${sid}`
+const callToBatchKey = (sid: string) => `callToBatch:${sid}`
+
+const plural = (n: number, one: string, many: string) =>
+  n === 1 ? `${n} ${one}` : `${n} ${many}`
+
+async function persistBatches($: EngineInterface, sid: string | null) {
+  if (sid === null) return
+  await $.store.set(batchesKey(sid), await read($, batches))
 }
-const persistCallToBatch = async ($: EngineInterface, sid: string) => {
-  await $.store.set(`callToBatch:${sid}`, await read($, callToBatch))
+
+async function persistCallToBatch($: EngineInterface, sid: string | null) {
+  if (sid === null) return
+  await $.store.set(callToBatchKey(sid), await read($, callToBatch))
+}
+
+async function setBatchExpanded(
+  $: EngineInterface,
+  sid: string | null,
+  bId: string,
+  expanded: boolean,
+) {
+  await update($, batches, b => ({
+    ...b,
+    [bId]: { ...b[bId], expanded },
+  }))
+  await persistBatches($, sid)
+}
+
+async function renderBatchAnchor(
+  $: EngineInterface,
+  e: RenderInput<'ToolUse' | 'ToolGroup'>,
+  next: (e: RenderInput<'ToolUse' | 'ToolGroup'>) => Promise<unknown>,
+  anchorId: string,
+  sid: string | null,
+) {
+  if (!(await read($, isEnabled))) return next(e)
+  const map = await read($, callToBatch)
+  const bId = map[anchorId]
+  if (bId === undefined) return next(e)
+  const bs = await read($, batches)
+  const batch = bs[bId]
+  if (batch === undefined) return next(e)
+
+  const isFirst = batch.ids[0] === anchorId
+  const n = batch.ids.length
+  const label = plural(n, 'tool call', 'tool calls')
+  const { Box, Button } = $.ui.resolve(e)
+
+  if (batch.expanded) {
+    if (!isFirst) return next(e)
+    const def = await next(e)
+    return (
+      <Box flexDirection="column">
+        <Button
+          key={`collapse-top-${bId}`}
+          label={`v (${label} made) click to collapse`}
+          dimColor
+          onPress={() => setBatchExpanded($, sid, bId, false)}
+        />
+        {def}
+      </Box>
+    )
+  }
+
+  if (!isFirst) return <Box />
+  return (
+    <Box>
+      <Button
+        key={`expand-${bId}`}
+        label={`> (${label} made) click to expand`}
+        dimColor
+        onPress={() => setBatchExpanded($, sid, bId, true)}
+      />
+    </Box>
+  )
 }
 
 export const register: Register = on => {
@@ -31,18 +102,19 @@ export const register: Register = on => {
     sessionId = await $.session.id()
     const en = (await $.store.get('isEnabled')) as boolean | undefined
     if (en !== undefined) await update($, isEnabled, () => en)
-    const bs = (await $.store.get(`batches:${sessionId}`)) as
+    const bs = (await $.store.get(batchesKey(sessionId))) as
       | Batches
       | undefined
     if (bs !== undefined) await update($, batches, () => bs)
-    const c = (await $.store.get(`callToBatch:${sessionId}`)) as
+    const c = (await $.store.get(callToBatchKey(sessionId))) as
       | CallToBatch
       | undefined
     if (c !== undefined) await update($, callToBatch, () => c)
 
     await $.command.register({
       name: 'collapse',
-      description: 'Toggle collapsing of tool calls between agent messages',
+      description:
+        'Toggle collapse-tool-use: hide or show tool calls between agent messages',
     })
     return next(e)
   })
@@ -51,7 +123,7 @@ export const register: Register = on => {
     const nextVal = !(await read($, isEnabled))
     await update($, isEnabled, () => nextVal)
     await $.store.set('isEnabled', nextVal)
-    return { text: `collapse-tools ${nextVal ? 'enabled' : 'disabled'}` }
+    return { text: `collapse-tool-use ${nextVal ? 'enabled' : 'disabled'}` }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -66,10 +138,8 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     currentBatch = null
-    if (sessionId !== null) {
-      await persistBatches($, sessionId)
-      await persistCallToBatch($, sessionId)
-    }
+    await persistBatches($, sessionId)
+    await persistCallToBatch($, sessionId)
     return next(e)
   })
 
@@ -85,82 +155,14 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    if (!(await read($, isEnabled))) return next(e)
-    const map = await read($, callToBatch)
-    const bId = map[e.props.tool_use_id]
-    if (bId === undefined) return next(e)
-    const bs = await read($, batches)
-    const batch = bs[bId]
-    if (batch === undefined) return next(e)
+  on('ui.render', { component: 'ToolUse' }, ($, e, next) =>
+    renderBatchAnchor($, e, next, e.props.tool_use_id, sessionId),
+  )
 
-    const isFirst = batch.ids[0] === e.props.tool_use_id
-    const { Box, Button } = $.ui.resolve(e)
-    const n = batch.ids.length
-    const setExpanded = async (v: boolean) => {
-      await update($, batches, b => ({
-        ...b,
-        [bId]: { ...b[bId], expanded: v },
-      }))
-      if (sessionId !== null) await persistBatches($, sessionId)
-    }
-    const collapse = () => setExpanded(false)
-
-    if (batch.expanded) {
-      if (!isFirst) return next(e)
-      const def = await next(e)
-      return (
-        <Box flexDirection="column">
-          <Button
-            key={`collapse-top-${bId}`}
-            label={`v (${n} tool call${n === 1 ? '' : 's'} made) click to collapse`}
-            dimColor
-            onPress={collapse}
-          />
-          {def}
-        </Box>
-      )
-    }
-
-    if (!isFirst) return <Box />
-    return (
-      <Box>
-        <Button
-          key={`expand-${bId}`}
-          label={`> (${n} tool call${n === 1 ? '' : 's'} made) click to expand`}
-          dimColor
-          onPress={() => setExpanded(true)}
-        />
-      </Box>
-    )
-  })
-
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (!(await read($, isEnabled))) return next(e)
-    const bs = await read($, batches)
-    const expanded = Object.entries(bs).filter(([, b]) => b.expanded)
-    if (expanded.length === 0) return next(e)
-    const { Box, Button, Text } = $.ui.resolve(e)
-    const collapseBand = (bId: string) => async () => {
-      await update($, batches, bb => ({
-        ...bb,
-        [bId]: { ...bb[bId], expanded: false },
-      }))
-      if (sessionId !== null) await persistBatches($, sessionId)
-    }
-    return (
-      <Box>
-        <Text dimColor>expanded: </Text>
-        {expanded.map(([bId, b]) => (
-          <Button
-            key={`collapse-band-${bId}`}
-            label={`^ ${b.ids.length} collapse`}
-            dimColor
-            onPress={collapseBand(bId)}
-          />
-        ))}
-      </Box>
-    )
+  on('ui.render', { component: 'ToolGroup' }, ($, e, next) => {
+    const first = e.props.calls[0]
+    if (first === undefined) return next(e)
+    return renderBatchAnchor($, e, next, first.tool_use_id, sessionId)
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -175,55 +177,23 @@ export const register: Register = on => {
     return <Box />
   })
 
-  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (!(await read($, isEnabled))) return next(e)
-    const first = e.props.calls[0]
-    const last = e.props.calls[e.props.calls.length - 1]
-    if (first === undefined || last === undefined) return next(e)
-    const map = await read($, callToBatch)
-    const bId = map[first.tool_use_id]
-    if (bId === undefined) return next(e)
     const bs = await read($, batches)
-    const batch = bs[bId]
-    if (batch === undefined) return next(e)
-
-    const isFirst = batch.ids[0] === first.tool_use_id
-    const { Box, Button } = $.ui.resolve(e)
-    const n = batch.ids.length
-    const setExpanded = async (v: boolean) => {
-      await update($, batches, b => ({
-        ...b,
-        [bId]: { ...b[bId], expanded: v },
-      }))
-      if (sessionId !== null) await persistBatches($, sessionId)
-    }
-    const collapse = () => setExpanded(false)
-
-    if (batch.expanded) {
-      if (!isFirst) return next(e)
-      const def = await next(e)
-      return (
-        <Box flexDirection="column">
-          <Button
-            key={`collapse-top-${bId}`}
-            label={`v (${n} tool call${n === 1 ? '' : 's'} made) click to collapse`}
-            dimColor
-            onPress={collapse}
-          />
-          {def}
-        </Box>
-      )
-    }
-
-    if (!isFirst) return <Box />
+    const expanded = Object.entries(bs).filter(([, b]) => b.expanded)
+    if (expanded.length === 0) return next(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
     return (
       <Box>
-        <Button
-          key={`expand-${bId}`}
-          label={`> (${n} tool call${n === 1 ? '' : 's'} made) click to expand`}
-          dimColor
-          onPress={() => setExpanded(true)}
-        />
+        <Text dimColor>expanded: </Text>
+        {expanded.map(([bId, b]) => (
+          <Button
+            key={`collapse-band-${bId}`}
+            label={`^ ${b.ids.length} collapse`}
+            dimColor
+            onPress={() => setBatchExpanded($, sessionId, bId, false)}
+          />
+        ))}
       </Box>
     )
   })
