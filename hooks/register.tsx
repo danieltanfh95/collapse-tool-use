@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { Register, EngineInterface } from 'claude-code'
 
 import type { Batches, CallToBatch } from '../types'
 
@@ -16,10 +16,30 @@ const isEnabled = atom(
   true,
 )
 
+const persistBatches = async ($: EngineInterface, sid: string) => {
+  await $.store.set(`batches:${sid}`, await read($, batches))
+}
+const persistCallToBatch = async ($: EngineInterface, sid: string) => {
+  await $.store.set(`callToBatch:${sid}`, await read($, callToBatch))
+}
+
 export const register: Register = on => {
   let currentBatch: string | null = null
+  let sessionId: string | null = null
 
   on('session.start', async ($, e, next) => {
+    sessionId = await $.session.id()
+    const en = (await $.store.get('isEnabled')) as boolean | undefined
+    if (en !== undefined) await update($, isEnabled, () => en)
+    const bs = (await $.store.get(`batches:${sessionId}`)) as
+      | Batches
+      | undefined
+    if (bs !== undefined) await update($, batches, () => bs)
+    const c = (await $.store.get(`callToBatch:${sessionId}`)) as
+      | CallToBatch
+      | undefined
+    if (c !== undefined) await update($, callToBatch, () => c)
+
     await $.command.register({
       name: 'collapse',
       description: 'Toggle collapsing of tool calls between agent messages',
@@ -28,9 +48,10 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'collapse' }, async $ => {
-    const next = !(await read($, isEnabled))
-    await update($, isEnabled, () => next)
-    return { text: `collapse-tools ${next ? 'enabled' : 'disabled'}` }
+    const nextVal = !(await read($, isEnabled))
+    await update($, isEnabled, () => nextVal)
+    await $.store.set('isEnabled', nextVal)
+    return { text: `collapse-tools ${nextVal ? 'enabled' : 'disabled'}` }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -43,8 +64,12 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('turn.complete', ($, e, next) => {
+  on('turn.complete', async ($, e, next) => {
     currentBatch = null
+    if (sessionId !== null) {
+      await persistBatches($, sessionId)
+      await persistCallToBatch($, sessionId)
+    }
     return next(e)
   })
 
@@ -72,11 +97,14 @@ export const register: Register = on => {
     const isFirst = batch.ids[0] === e.props.tool_use_id
     const { Box, Button } = $.ui.resolve(e)
     const n = batch.ids.length
-    const collapse = () =>
-      update($, batches, b => ({
+    const setExpanded = async (v: boolean) => {
+      await update($, batches, b => ({
         ...b,
-        [bId]: { ...b[bId], expanded: false },
+        [bId]: { ...b[bId], expanded: v },
       }))
+      if (sessionId !== null) await persistBatches($, sessionId)
+    }
+    const collapse = () => setExpanded(false)
 
     if (batch.expanded) {
       if (!isFirst) return next(e)
@@ -101,12 +129,7 @@ export const register: Register = on => {
           key={`expand-${bId}`}
           label={`> (${n} tool call${n === 1 ? '' : 's'} made) click to expand`}
           dimColor
-          onPress={() =>
-            update($, batches, b => ({
-              ...b,
-              [bId]: { ...b[bId], expanded: true },
-            }))
-          }
+          onPress={() => setExpanded(true)}
         />
       </Box>
     )
@@ -118,6 +141,13 @@ export const register: Register = on => {
     const expanded = Object.entries(bs).filter(([, b]) => b.expanded)
     if (expanded.length === 0) return next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
+    const collapseBand = (bId: string) => async () => {
+      await update($, batches, bb => ({
+        ...bb,
+        [bId]: { ...bb[bId], expanded: false },
+      }))
+      if (sessionId !== null) await persistBatches($, sessionId)
+    }
     return (
       <Box>
         <Text dimColor>expanded: </Text>
@@ -126,12 +156,7 @@ export const register: Register = on => {
             key={`collapse-band-${bId}`}
             label={`^ ${b.ids.length} collapse`}
             dimColor
-            onPress={() =>
-              update($, batches, bb => ({
-                ...bb,
-                [bId]: { ...bb[bId], expanded: false },
-              }))
-            }
+            onPress={collapseBand(bId)}
           />
         ))}
       </Box>
@@ -165,11 +190,14 @@ export const register: Register = on => {
     const isFirst = batch.ids[0] === first.tool_use_id
     const { Box, Button } = $.ui.resolve(e)
     const n = batch.ids.length
-    const collapse = () =>
-      update($, batches, b => ({
+    const setExpanded = async (v: boolean) => {
+      await update($, batches, b => ({
         ...b,
-        [bId]: { ...b[bId], expanded: false },
+        [bId]: { ...b[bId], expanded: v },
       }))
+      if (sessionId !== null) await persistBatches($, sessionId)
+    }
+    const collapse = () => setExpanded(false)
 
     if (batch.expanded) {
       if (!isFirst) return next(e)
@@ -194,12 +222,7 @@ export const register: Register = on => {
           key={`expand-${bId}`}
           label={`> (${n} tool call${n === 1 ? '' : 's'} made) click to expand`}
           dimColor
-          onPress={() =>
-            update($, batches, b => ({
-              ...b,
-              [bId]: { ...b[bId], expanded: true },
-            }))
-          }
+          onPress={() => setExpanded(true)}
         />
       </Box>
     )
