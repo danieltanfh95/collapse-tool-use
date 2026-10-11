@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "collapse-tool-use",
+  "description": "Single-plugin marketplace for the collapse-tool-use mod",
+  "owner": {
+    "name": "Daniel Tan",
+    "email": "danieltanfh95@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "collapse-tool-use",
+      "description": "Hide tool calls between agent messages behind one expandable button per turn",
+      "author": {
+        "name": "Daniel Tan",
+        "email": "danieltanfh95@gmail.com"
+      },
+      "source": {
+        "source": "url",
+        "url": "https://github.com/danieltanfh95/collapse-tool-use.git"
+      },
+      "homepage": "https://github.com/danieltanfh95/collapse-tool-use",
+      "category": "development",
+      "license": "MIT"
+    }
+  ]
+}

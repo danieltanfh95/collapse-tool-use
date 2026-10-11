@@ -16,21 +16,40 @@ State is persisted via the plugin's `$.store`: toggle a batch, quit, resume the 
 
 ## Install
 
-### As a dev-mod (hot-reload, no restart)
+### From the marketplace (recommended)
 
-```bash
-mkdir -p ~/.claude/dev-mods/$(uuidgen)
-git clone https://github.com/danieltanfh95/collapse-tool-use ~/.claude/dev-mods/$(uuidgen)/collapse-tool-use
+Inside Claude Code (2.1.275 or later):
+
+```
+/plugin install collapse-tool-use --marketplace danieltanfh95/collapse-tool-use
 ```
 
-Claude Code's engine will ask once per session whether to enable hot-reload for that mods folder. Pick **Enable for this session**.
+Restart Claude Code so the plugin loads at session start.
 
-### As a one-shot
+### Manual: skills-dir
+
+Symlink or copy the repo into `~/.claude/skills/`:
+
+```bash
+git clone https://github.com/danieltanfh95/collapse-tool-use ~/.claude/skills/collapse-tool-use
+```
+
+Loads in every new session as `collapse-tool-use@skills-dir`.
+
+### One-shot: `--plugin-dir`
 
 ```bash
 git clone https://github.com/danieltanfh95/collapse-tool-use
 claude --plugin-dir ./collapse-tool-use
 ```
+
+### Dev-mod with hot-reload
+
+```bash
+git clone https://github.com/danieltanfh95/collapse-tool-use ~/.claude/dev-mods/$(uuidgen)/collapse-tool-use
+```
+
+Claude Code will ask once per session to enable hot-reload for that mods folder; pick **Enable for this session**.
 
 ## Usage
 
