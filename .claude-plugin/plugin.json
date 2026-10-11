@@ -1,0 +1,6 @@
+{
+  "name": "collapse-tools",
+  "version": "0.1.0",
+  "description": "Hide tool calls between agent messages behind one expandable button per turn",
+  "types": "./types/index.d.ts"
+}
